@@ -1,0 +1,256 @@
+---
+title: "Drivers-of-Liking Example"
+author: "Brian Guthrie"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output: 
+    html_document:
+      toc: true
+  
+---
+
+Outline
+
+- How to explain differences in preference using sensory data
+- How to evaluate the relationships between each sensory attribute and hedonics at different levels of liking
+- How to locate an sensory-optimal product within product space
+
+# Data organization.
+
+## Review
+- The hedonic data set should have consumers as variables (columns) with liking scores for each product (rows)
+- Sensory (QDA, etc) data has attributes as variables (columns), panel average intensities for products (rows)
+
+**Objective** is to combine these data sets for analysis using products as the anchors (e.g. explain liking from the sensory scores and potential sensory-optimal product to enable successful product development)
+
+## Approach:
+Let's start with a look at consumer hedonics and see differences using the sensory data by projecting them as "supplementary variables" into the hedonic space. (called _Internal Preference mapping_, **MDPREF**). This is limited to linear regression. 
+
+Next We will look at different types of regression.
+
+Finally, we will focus on determining the optimal products using the sensory space (called _External preference mapping_, **PrefMap**, and more advanced mapping such as PrefMFA)
+
+We will use hedoninc and sensory data sets of 12 perfumes. The data files should be downloaded from the github [repo](https://github.com/bgut333/Sensory400) for the class.
+
+Load the sensory data file into a table. Re-classify several variables as factor-types.
+
+```{r SensoMineR,warning = FALSE}
+getwd()
+setwd("C:/Users/bchee/OneDrive/Documents/stout/Dataset_book")
+getwd()
+sensory <- read.table("perfumes_qda_experts2.csv", header=TRUE, sep=",", dec=".", quote="\"")
+sensory$Session <- as.factor(sensory$Session)
+sensory$Rank <- as.factor(sensory$Rank)
+head(sensory)
+```
+
+Let's look at the hedonic data.
+
+```{r, warning = FALSE}
+getwd()
+setwd("C:/Users/bchee/OneDrive/Documents/stout/Dataset_book")
+hedonic <- read.table("perfumes_liking_conso.csv", header=TRUE, sep=",", dec=".", quote="\"")
+hedonic$consumer <-as.factor(hedonic$consumer)
+hedonic$product <-as.factor((hedonic$product))
+head(hedonic)
+
+```
+
+You should notice that the data is not arranged correctly. We need the consumers as columns. Here is a loop that will make the changes (you should review this closely as a good and typical example of data shape mutation often needed for analysis)
+
+```{r, warning = FALSE}
+conso <- levels(hedonic$consumer)
+nbconso <- length(conso)
+product <- levels(hedonic$product)
+hedonic.c <- matrix(0, length(product), 0)
+rownames(hedonic.c) <- product
+for (j in 1:nbconso){
+  data.c <- as.matrix(hedonic[hedonic$consumer==conso[j], 3])
+  rownames(data.c) <- hedonic[hedonic$consumer==conso[j], 2]
+  hedonic.c <- cbind.data.frame(hedonic.c, data.c[rownames(hedonic.c),])
+} 
+colnames(hedonic.c) <- paste("C",conso,sep="")
+head(hedonic.c[,1:5])
+    
+```
+
+
+Next we need to compute averages of the data in the sensory matrix. Notice the package we are using and how to get help with the functions (tip: search on the packages tab below).
+
+```{r, warning = FALSE}
+library(SensoMineR)
+sensory <- averagetable(sensory, formul = "~Product+Panelist", firstvar = 5)
+head(sensory)
+```
+
+AS we discussed above, we will now look at the variability of the products in terms of consumer preferences and project sensory variables into this space using PCA of the hedonic data. Sensory data is not used to build the space and only linear relationships will be seen between hedonic and sensory data at this point. Still, this is a good exploratory step (mdpref).
+
+To do this, we will need to combine the data sets. (look up the **cbind** command). The results will captured in t the mdpref.data object.
+
+```{r, warning = FALSE}
+mdpref.data <- cbind(hedonic.c, sensory[rownames(hedonic.c),])
+mdpref <- PCA(mdpref.data, quanti.sup = (ncol(hedonic.c)+1):ncol(mdpref.data), graph=FALSE)
+plot.PCA(mdpref, choix = "ind")
+```
+
+The plots show separation in different dimensions: dimension 1 separates Angel, Shalimar and Aromatics Elixir to Jadore ET, Jadore EP, and Coco Mademoiselle. 
+
+At this point we do not know if these are separated by sensory differences. 
+
+Let's look at products and correlations of the sensory attributes
+
+```{r}
+plot.PCA(mdpref, choix = "var", label = "quanti.sup")
+library(FactoMineR)
+res.dimdesc <- dimdesc(mdpref)
+select.supp <- which(rownames(res.dimdesc$'Dim.1'$quanti) %in% colnames(sensory))
+res.dimdesc$'Dim.1'$quanti[select.supp,]  
+```
+
+From the plot, the first dimension can be explained by *Fruity*, *Marine*, *Wrapping*, *Oriental*, etc. So, consumers who liked Jadore EP and Coco Mademoiselle responded positively to stronger *Fruity* and *Marine* but weaker *Wrapping* and *Oriental*.
+
+The table shows how each sensory attribute was related to each dimension (look up the docs on the **dimdesc** function)
+
+For the first dimension, we can easily see the strength of the correlation.
+
+
+# How to evaluate the relationship between each sensory attribute and hedonics and different levels?
+
+## Overview
+PCA has a weakness since it is using correlation and linear relationships. So, we use some steps to help this out for better fits and interpretations. First, explore simple linear regression models of each attribute with liking. A positive relationship indicates a driver of liking. A negative relationship indicates a driver of disliking. No relationship means the attribute is neither. It important to consider the consumer segments to determine if drivers are "global" (for all consumers) or are for specific consumer segments. Very often consumer segments have very different drivers. 
+
+## Exploration for Global Drivers of Liking 
+Let's use linear models (**lm** function) to explore global drivers of liking (average over all consumers, as if no consumer segmentation). We will compute and add the averages to the data table
+
+```{r, warning = FALSE}
+hedonic.means <- as.matrix(apply(hedonic.c, 1, mean))
+rownames(hedonic.means <= rownames(hedonic.c))
+data.dol <- cbind(sensory, hedonic.means[rownames(sensory),])
+colnames(data.dol)[ncol(data.dol)] <- "Liking"
+```
+
+Next, let's use the new data table to look at *Vanilla* to see if it is a global driver.
+
+```{r, warning = FALSE}
+vanilla.reg <- lm(Liking~Vanilla, data = data.dol)
+summary(vanilla.reg)
+
+```
+Looks like *Vanilla* is not a linear driver of liking (p-value=0.41), let's test *Oriental*.
+
+```{r, warning = FALSE}
+oriental.reg <- lm(Liking~Oriental, data = data.dol)
+summary(oriental.reg)
+
+```
+
+*Oriental* (p-value 0.0002) looks like a linear driver but the regression coefficient is negative (estimate =-0.31) so lower *Oriental* intensity is a driver (*Oriental* intensity is disliked). 
+
+Linear relationships can be misleading. Let's look at the plots
+
+
+let's look at some plots of intensity versus liking to check to see if there is non-linearity.
+
+```{r, warning = FALSE}
+layout(matrix(1:2, 1,2))
+plot(data.dol$Vanilla,data.dol$Liking, xlab="Vanilla", ylab = "Liking", type = "p", pch=20, main = "Simple Regression" )
+abline(a=summary(vanilla.reg)$coefficients[1], b=summary(vanilla.reg)$coefficients[2], lwd=2)
+plot(data.dol$Oriental, data.dol$Liking, xlab="Oriental", ylab="Liking", type = "p", pch=20, main = "Simple Regression")
+abline(a=summary(oriental.reg)$coefficients[1], b=summary(oriental.reg)$coefficients[2], lwd=2)
+
+```
+We can see that *Vanilla* has almost no relationship to liking. *Oriental* clearly has a negative relationship with liking.
+
+While linear relationships are a good place to start exploration, many attributes are known to have "bliss point" or a level of saturation, such as some is good but more is not better. Let's explore some non-linear or quadratic effects for the *Wrapping* attribute. First we need to calculate the squared level and add it to the data set for analysis.
+
+```{r, warning = FALSE}
+data.dol2 <-cbind.data.frame(data.dol$Wrapping, data.dol$Wrapping^2, data.dol$Liking)
+rownames(data.dol2) <-rownames(data.dol)
+colnames(data.dol2) <- c("Wrapping", "Wrapping2", "Liking")
+wrapping.reg <- lm(Liking~ Wrapping+Wrapping2, data = data.dol2)
+summary(wrapping.reg)
+
+
+```
+let's see the saturation plot
+
+```{r, warning = FALSE}
+plot(data.dol$Wrapping, data.dol$Liking, xlab = "Wrapping", ylab = "liking", type = "p", pch=20, main = "Quadratic Regression")
+xseq <- seq(min(data.dol$Wrapping), max(data.dol$Wrapping), 0.05)
+lines(xseq, y=(summary(wrapping.reg)$coefficients[1]+summary(wrapping.reg)$coefficients[2]*xseq+summary(wrapping.reg)$coefficients[3]*xseq^2), lwd= 2)
+```
+
+We clearly see a saturation relationship. It is always a good idea to plot **ALL** attributes first then look for additional non-linear effects like saturation. The global test for *Wrapping* was significant,especially notice the quadratic effect (p-value for Wrapping2=0.056, very close to significance) while the linear effect was not (p-value=0.1345 for Wrapping). Also the estimate for Wrapping2 was negative thus showing a maximum. From this we can see that the optimal level of Wrapping is near 4.0.
+
+## Exploration for Drivers of Liking Amongst Individuals
+
+Usually we would next address DOL determination for consumer segments as determined by segmentation analysis (ref early lectures). Here we will take a quick look at several individual consumers to see differences.Let's look at consumer 1755 and 10815 and the *Fruity* attribute
+
+```{r, warning = FALSE}
+Fruity.1756 <- lm(C1755~Fruity, data = mdpref.data)
+summary(Fruity.1756)
+
+
+```
+second consumer:
+
+```{r, warning = FALSE}
+Fruity.10815 <- lm(C10815~Fruity, data = mdpref.data)
+summary(Fruity.10815)
+
+```
+
+We can see that *Fruity* is a mild driver of disliking for consumer 1755 (est=-0.46) but a strong driver of liking for consumer 10815 (est=0.82).
+
+
+# How can I find the sensory-optimal product
+
+Sensory attributes are problematic as they are often correlated. So, we must consider all attributes in our analysis for the determination of the sensory-optimal product. There are many approaches for this. The most commonly used are **PLS** (partial least squares) regression and **PCR** (principle components) regression. There are numerical differences with PLS being better at handling collinearity. 
+
+Here, we will apply PCR. These methods involve a data reduction step with the projection of data on a reduced number of of orthogonal latent components followed by a regression of the projected data with liking. We will use the scores from the first three principle components to solve problem with low degrees of freedom and multi-collinearity fced with approaches such as multiple linear regression.
+
+```{r, warning = FALSE}
+sensory.pca <- PCA(sensory, graph = FALSE)
+names(sensory.pca)
+sensory.pca$var$coord
+
+```
+Here we extract the first three components for regression modeling and combine with liking data for the analysis
+
+```{r, warning = FALSE}
+data.pcr <- cbind.data.frame(hedonic.means, sensory.pca$ind$coord[rownames(hedonic.means), 1:3])
+colnames(data.pcr)[1] <- c("Liking")
+res.pcr <- lm(Liking~Dim.1 + Dim.2 + Dim.3, data = data.pcr)
+summary(res.pcr)
+```
+
+We see that the test is significant and the first three components are affecting liking. We can also see that the first dimension is negative (estimate=-0.25) with liking, so also negatively linked with first dimension attributes *Fruity*, *Floral*, *Marine*, etc. 
+
+But, as we have seen, these so far are just linear effects. Non-linear effects such as quadratic and interaction effects should also be considered. Here are some examples of models to try:
+
+linear of vector model:
+
+$Liking= a + b_{1}*F_{1} +b_{2}*F_{2}$
+
+circular model (with quadratic effects):
+
+$Liking= a + b_{1}*F_{1} + b_{2}*F_{2} + b_{3}*(F_{1}^{2} + F_{2}^{2})$
+
+elliptical model:
+
+$liking= a + b_{1}*F_{1} +b_{2}*F_{2} + b_{11}*F_{1}^{2} +b_{22}*F_{2}^{2}$
+
+quadratic (Danzart) model (linear, quadratic, and 2-way interactions):
+
+$liking= a + b_{1}*F_{1} + b_{2}*F_{2} + b_{11}*F_{1}^{2} + b_{22}* F_{2}^{2} + b_{12}*F_{1}F_{2}$
+
+Sadly, these require more degrees of freedom (numbers of samples) to be properly fit. 
+
+Finally, all consumer have their individual drivers of liking. External PrefMap takes this into account. First, individual liking models are defined and liking scores are estimated for every point in the product space and summed. This allows an identification of the overall liking surface. This is usually shown with percentage iso-lines. We use the **carto** function to map this. 
+
+
+```{r}
+
+prefmap <- carto(sensory.pca$ind$coord[,1:2], hedonic.c, level=0, regmod=1 )
+```
+
+we can see zones of maximum liking are close to Jadore ET and Coco Mademoiselle with about 70% of consumers accepting these. The sensory attributes of the optimal products can then be obtained by reconstitution of he PCR formula or reverse regression modeling.
